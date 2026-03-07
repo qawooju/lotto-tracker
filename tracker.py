@@ -230,89 +230,130 @@ def format_numbers(nums):
 
 
 def generate_ai_picks(counter, history):
-    """AI 추천 — 구간 균형 + 홀짝 균형 + 합계 범위 기반"""
+    """사주팔자 + 오늘의 운세 기반 AI 추천 (1978년 음력 5월 2일생 남성, 戊午年)"""
     games = []
     all_numbers = list(range(1, 46))
     weights = [counter.get(n, 0) + 1 for n in all_numbers]
+    today = datetime.now(KST)
 
-    # 역대 당첨 번호 합계 평균/범위 분석
+    # ── 사주팔자 기반 행운 번호 ──
+    # 戊午年(무오년) = 천간 戊(토) + 지지 午(화)
+    # 오행 숫자: 화(火)=2,7 / 토(土)=5,10 / 금(金)=4,9 / 수(水)=1,6 / 목(木)=3,8
+    # 본명 오행: 토+화 → 재물운 금(4,9), 식상운 금(4,9), 관운 목(3,8)
+    SAJU_CORE = [2, 5, 7, 10]         # 본명 오행 (화+토 계열)
+    SAJU_WEALTH = [4, 9, 14, 19]      # 재물운 (금 계열)
+    SAJU_CAREER = [3, 8, 13, 18]      # 관운/성취운 (목 계열)
+
+    # 생년월일 파생 행운번호 (78, 5, 2 → 7,8,5,2 + 합산)
+    BIRTH_NUMS = [2, 5, 7, 8, 15, 25, 35, 42]  # 생년월일 숫자 조합
+
+    # 차/여행 취미 → 이동수 (驛馬) = 午의 역마: 申(8월=8계열)
+    HOBBY_NUMS = [8, 18, 28, 38]  # 역마살(이동운) 기반
+
+    # 오늘의 운세 시드: 날짜 기반 행운 오프셋
+    day_seed = today.year * 10000 + today.month * 100 + today.day
+    daily_offset = day_seed % 45 + 1  # 1~45
+
+    # 역대 당첨 합계 범위
     sums = [sum(d["numbers"]) for d in history.values()]
     avg_sum = sum(sums) / len(sums)
     min_sum = int(avg_sum - 30)
     max_sum = int(avg_sum + 30)
 
     strategies = [
-        "구간 균형 (1~45를 5구간 분배)",
-        "홀짝 밸런스 (3홀 + 3짝)",
-        "합계 최적화 (당첨 평균 합계 범위)",
-        "연속번호 포함 (2연속 + 분산 4개)",
-        "최근 10회 트렌드 기반",
+        "사주팔자 (戊午년 토+화 오행 조합)",
+        "재물운 (금 오행 + 생년월일 행운수)",
+        "역마운 (이동·여행·차 기운 반영)",
+        "오늘의 운세 (일진 행운 오프셋)",
+        "사주 종합 (오행 밸런스 + 합계 최적화)",
     ]
 
     for idx in range(5):
         attempts = 0
-        while attempts < 100:
+        while attempts < 200:
             attempts += 1
 
             if idx == 0:
-                # 구간 균형: 각 구간에서 1~2개
-                zones = [(1, 9), (10, 18), (19, 27), (28, 36), (37, 45)]
-                picks = []
-                for lo, hi in zones:
-                    zone_nums = [n for n in range(lo, hi + 1)]
-                    zone_w = [weights[n - 1] for n in zone_nums]
-                    picks.append(random.choices(zone_nums, weights=zone_w, k=1)[0])
-                # 6번째: 전체에서 가중치 랜덤
-                extra = random.choices(all_numbers, weights=weights, k=1)[0]
-                while extra in picks:
-                    extra = random.choices(all_numbers, weights=weights, k=1)[0]
-                picks.append(extra)
-                nums = sorted(picks)
+                # 사주팔자: 본명 오행(화+토) 숫자 우선
+                saju_w = weights[:]
+                for n in all_numbers:
+                    if n in SAJU_CORE or n % 10 in [2, 5, 7, 0]:
+                        saju_w[n - 1] *= 3
+                    if n in BIRTH_NUMS:
+                        saju_w[n - 1] *= 2
+                nums = sorted(random.choices(all_numbers, weights=saju_w, k=6))
+                if len(set(nums)) != 6:
+                    continue
+                nums = sorted(set(nums))[:6]
 
             elif idx == 1:
-                # 홀짝 3:3
-                odds = [n for n in all_numbers if n % 2 == 1]
-                evens = [n for n in all_numbers if n % 2 == 0]
-                odd_w = [weights[n - 1] for n in odds]
-                even_w = [weights[n - 1] for n in evens]
-                odd_picks = random.choices(odds, weights=odd_w, k=3)
-                even_picks = random.choices(evens, weights=even_w, k=3)
-                nums = sorted(set(odd_picks + even_picks))
+                # 재물운: 금 오행(4,9계열) + 생년월일 수
+                pool = list(set(SAJU_WEALTH + BIRTH_NUMS))
+                pool = [n for n in pool if 1 <= n <= 45]
+                if len(pool) < 4:
+                    pool = SAJU_WEALTH[:]
+                picks = random.sample(pool, min(4, len(pool)))
+                remaining = [n for n in all_numbers if n not in picks]
+                rem_w = [weights[n - 1] for n in remaining]
+                extras = random.choices(remaining, weights=rem_w, k=6 - len(picks))
+                nums = sorted(set(picks + extras))
                 if len(nums) != 6:
                     continue
 
             elif idx == 2:
-                # 합계 최적화
-                nums = sorted(random.choices(all_numbers, weights=weights, k=6))
+                # 역마운(이동/여행/차): 역마 숫자(8계열) + 오행 조합
+                hobby_w = weights[:]
+                for n in all_numbers:
+                    if n in HOBBY_NUMS:
+                        hobby_w[n - 1] *= 4
+                    if n in SAJU_CORE:
+                        hobby_w[n - 1] *= 2
+                # 반드시 역마 숫자 1개 이상 포함
+                must = random.choice(HOBBY_NUMS)
+                picks = [must]
+                remaining = [n for n in all_numbers if n != must]
+                rem_w = [hobby_w[n - 1] for n in remaining]
+                extras = random.choices(remaining, weights=rem_w, k=5)
+                nums = sorted(set(picks + extras))
+                if len(nums) != 6:
+                    continue
+
+            elif idx == 3:
+                # 오늘의 운세: 일진 기반 오프셋 적용
+                lucky_base = [daily_offset]
+                for delta in [7, 14, 21, 28, 35]:
+                    n = (daily_offset + delta - 1) % 45 + 1
+                    lucky_base.append(n)
+                # 행운 번호에 가중치 부여
+                daily_w = weights[:]
+                for n in lucky_base:
+                    daily_w[n - 1] *= 3
+                for n in BIRTH_NUMS:
+                    if 1 <= n <= 45:
+                        daily_w[n - 1] *= 2
+                nums = sorted(random.choices(all_numbers, weights=daily_w, k=6))
+                if len(set(nums)) != 6:
+                    continue
+                nums = sorted(set(nums))[:6]
+
+            elif idx == 4:
+                # 사주 종합: 오행 밸런스 + 합계 최적화
+                balanced_w = weights[:]
+                for n in all_numbers:
+                    if n in SAJU_CORE:
+                        balanced_w[n - 1] *= 2
+                    if n in SAJU_WEALTH:
+                        balanced_w[n - 1] *= 2
+                    if n in BIRTH_NUMS:
+                        balanced_w[n - 1] *= 2
+                    if n in HOBBY_NUMS:
+                        balanced_w[n - 1] *= 1.5
+                nums = sorted(random.choices(all_numbers, weights=balanced_w, k=6))
                 if len(set(nums)) != 6:
                     continue
                 nums = sorted(set(nums))[:6]
                 if not (min_sum <= sum(nums) <= max_sum):
                     continue
-
-            elif idx == 3:
-                # 연속번호 2개 포함
-                start = random.randint(1, 44)
-                consec = [start, start + 1]
-                remaining = [n for n in all_numbers if n not in consec]
-                rem_w = [weights[n - 1] for n in remaining]
-                extras = random.choices(remaining, weights=rem_w, k=4)
-                nums = sorted(set(consec + extras))
-                if len(nums) != 6:
-                    continue
-
-            elif idx == 4:
-                # 최근 10회 트렌드
-                recent_rounds = sorted(history.keys(), key=int, reverse=True)[:10]
-                recent_counter = Counter()
-                for rnd in recent_rounds:
-                    for n in history[rnd]["numbers"]:
-                        recent_counter[n] += 1
-                recent_w = [recent_counter.get(n, 0) + 1 for n in all_numbers]
-                nums = sorted(random.choices(all_numbers, weights=recent_w, k=6))
-                if len(set(nums)) != 6:
-                    continue
-                nums = sorted(set(nums))[:6]
 
             games.append(nums)
             break
@@ -433,7 +474,7 @@ def main():
     print("  스레드: 빈도 기반 추천")
 
     # 3) AI 추천 스레드
-    ai_blocks = build_games_thread("AI 추천 (밸런스 분석)", ai_games, ai_strategies)
+    ai_blocks = build_games_thread("사주 기반 추천 (戊午년 오행 분석)", ai_games, ai_strategies)
     slack_post([{"type": "divider"}] + ai_blocks, thread_ts=ts)
     print("  스레드: AI 추천")
 
