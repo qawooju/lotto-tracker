@@ -96,7 +96,7 @@ def fetch_lotto_history(state):
     latest = get_latest_round()
 
     # 최근 회차까지 수집 (캐시에 없는 것만)
-    start = max(1, latest - 200)  # 최근 200회차
+    start = max(1, latest - 100)  # 최근 100회차
     new_count = 0
 
     for rnd in range(start, latest + 1):
@@ -229,7 +229,98 @@ def format_numbers(nums):
     return "  ".join(result)
 
 
-def build_message(games, counter, history, next_round):
+def generate_ai_picks(counter, history):
+    """AI 추천 — 구간 균형 + 홀짝 균형 + 합계 범위 기반"""
+    games = []
+    all_numbers = list(range(1, 46))
+    weights = [counter.get(n, 0) + 1 for n in all_numbers]
+
+    # 역대 당첨 번호 합계 평균/범위 분석
+    sums = [sum(d["numbers"]) for d in history.values()]
+    avg_sum = sum(sums) / len(sums)
+    min_sum = int(avg_sum - 30)
+    max_sum = int(avg_sum + 30)
+
+    strategies = [
+        "구간 균형 (1~45를 5구간 분배)",
+        "홀짝 밸런스 (3홀 + 3짝)",
+        "합계 최적화 (당첨 평균 합계 범위)",
+        "연속번호 포함 (2연속 + 분산 4개)",
+        "최근 10회 트렌드 기반",
+    ]
+
+    for idx in range(5):
+        attempts = 0
+        while attempts < 100:
+            attempts += 1
+
+            if idx == 0:
+                # 구간 균형: 각 구간에서 1~2개
+                zones = [(1, 9), (10, 18), (19, 27), (28, 36), (37, 45)]
+                picks = []
+                for lo, hi in zones:
+                    zone_nums = [n for n in range(lo, hi + 1)]
+                    zone_w = [weights[n - 1] for n in zone_nums]
+                    picks.append(random.choices(zone_nums, weights=zone_w, k=1)[0])
+                # 6번째: 전체에서 가중치 랜덤
+                extra = random.choices(all_numbers, weights=weights, k=1)[0]
+                while extra in picks:
+                    extra = random.choices(all_numbers, weights=weights, k=1)[0]
+                picks.append(extra)
+                nums = sorted(picks)
+
+            elif idx == 1:
+                # 홀짝 3:3
+                odds = [n for n in all_numbers if n % 2 == 1]
+                evens = [n for n in all_numbers if n % 2 == 0]
+                odd_w = [weights[n - 1] for n in odds]
+                even_w = [weights[n - 1] for n in evens]
+                odd_picks = random.choices(odds, weights=odd_w, k=3)
+                even_picks = random.choices(evens, weights=even_w, k=3)
+                nums = sorted(set(odd_picks + even_picks))
+                if len(nums) != 6:
+                    continue
+
+            elif idx == 2:
+                # 합계 최적화
+                nums = sorted(random.choices(all_numbers, weights=weights, k=6))
+                if len(set(nums)) != 6:
+                    continue
+                nums = sorted(set(nums))[:6]
+                if not (min_sum <= sum(nums) <= max_sum):
+                    continue
+
+            elif idx == 3:
+                # 연속번호 2개 포함
+                start = random.randint(1, 44)
+                consec = [start, start + 1]
+                remaining = [n for n in all_numbers if n not in consec]
+                rem_w = [weights[n - 1] for n in remaining]
+                extras = random.choices(remaining, weights=rem_w, k=4)
+                nums = sorted(set(consec + extras))
+                if len(nums) != 6:
+                    continue
+
+            elif idx == 4:
+                # 최근 10회 트렌드
+                recent_rounds = sorted(history.keys(), key=int, reverse=True)[:10]
+                recent_counter = Counter()
+                for rnd in recent_rounds:
+                    for n in history[rnd]["numbers"]:
+                        recent_counter[n] += 1
+                recent_w = [recent_counter.get(n, 0) + 1 for n in all_numbers]
+                nums = sorted(random.choices(all_numbers, weights=recent_w, k=6))
+                if len(set(nums)) != 6:
+                    continue
+                nums = sorted(set(nums))[:6]
+
+            games.append(nums)
+            break
+
+    return games, strategies
+
+
+def build_header(counter, history, next_round):
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
 
     # 최근 당첨 번호
@@ -258,26 +349,33 @@ def build_message(games, counter, history, next_round):
                 ),
             },
         },
-        {"type": "divider"},
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": "상세 추천은 스레드를 확인해주세요"}]},
     ]
+    return blocks
 
-    # 추천 번호
+
+def build_games_thread(title, games, strategies):
+    """추천 게임 스레드 블록"""
+    lines = [f"*{title}*\n"]
     for i, nums in enumerate(games):
-        strategy = get_strategy_name(i)
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": f"*추천 {i + 1}* — {strategy}\n{format_numbers(nums)}",
-            },
-        })
+        strategy = strategies[i] if i < len(strategies) else f"추천 {i + 1}"
+        lines.append(f"*{i + 1}.* {strategy}")
+        lines.append(f"  {format_numbers(nums)}\n")
 
-    blocks.append({"type": "divider"})
-    blocks.append({
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": "역대 당첨 빈도 기반 통계 추천 | 당첨을 보장하지 않습니다"}],
-    })
+    lines.append("_당첨을 보장하지 않습니다_")
 
+    blocks = []
+    chunk = []
+    chunk_len = 0
+    for line in lines:
+        if chunk and chunk_len + len(line) + 1 > 800:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
+            chunk = []
+            chunk_len = 0
+        chunk.append(line)
+        chunk_len += len(line) + 1
+    if chunk:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
     return blocks
 
 
@@ -310,18 +408,34 @@ def main():
     next_round = get_latest_round() + 1
 
     # 추천 번호 생성
-    print("\n[번호 추천]")
-    games = generate_recommendations(counter, pair_counter, NUM_GAMES)
-    for i, nums in enumerate(games):
-        print(f"  추천 {i + 1}: {nums}")
+    print("\n[빈도 기반 추천]")
+    freq_games = generate_recommendations(counter, pair_counter, NUM_GAMES)
+    freq_strategies = [get_strategy_name(i) for i in range(NUM_GAMES)]
+    for i, nums in enumerate(freq_games):
+        print(f"  빈도 {i + 1}: {nums}")
 
-    # Slack 발송
-    blocks = build_message(games, counter, history, next_round)
-    ts = slack_post(blocks)
-    if ts:
-        print(f"\n메시지 전송 완료 (ts={ts})")
-    else:
-        print("\n메시지 전송 실패")
+    print("\n[AI 추천]")
+    ai_games, ai_strategies = generate_ai_picks(counter, history)
+    for i, nums in enumerate(ai_games):
+        print(f"  AI {i + 1}: {nums}")
+
+    # 1) 메인 메시지
+    header_blocks = build_header(counter, history, next_round)
+    ts = slack_post(header_blocks)
+    if not ts:
+        print("\n메인 메시지 전송 실패. 종료.")
+        return
+    print(f"\n메인 메시지 전송 (ts={ts})")
+
+    # 2) 빈도 기반 추천 스레드
+    freq_blocks = build_games_thread("빈도 기반 추천 (통계 분석)", freq_games, freq_strategies)
+    slack_post(freq_blocks, thread_ts=ts)
+    print("  스레드: 빈도 기반 추천")
+
+    # 3) AI 추천 스레드
+    ai_blocks = build_games_thread("AI 추천 (밸런스 분석)", ai_games, ai_strategies)
+    slack_post([{"type": "divider"}] + ai_blocks, thread_ts=ts)
+    print("  스레드: AI 추천")
 
     # 상태 저장
     state["history"] = history
