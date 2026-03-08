@@ -218,21 +218,8 @@ def get_strategy_name(idx):
 
 # ── 메시지 빌드 ───────────────────────────────────────────────────────────
 def format_numbers(nums):
-    """번호를 동그라미 형태로 포맷"""
-    ranges = {
-        (1, 10): "🟡",    # 1~10: 노랑
-        (11, 20): "🔵",   # 11~20: 파랑
-        (21, 30): "🔴",   # 21~30: 빨강
-        (31, 40): "⚫",   # 31~40: 검정
-        (41, 45): "🟢",   # 41~45: 초록
-    }
-    result = []
-    for n in nums:
-        for (lo, hi), emoji in ranges.items():
-            if lo <= n <= hi:
-                result.append(f"{emoji}`{n:2d}`")
-                break
-    return "  ".join(result)
+    """번호를 포맷"""
+    return "  ".join(f"`{n:2d}`" for n in nums)
 
 
 def generate_ai_picks(counter, history):
@@ -409,8 +396,6 @@ def build_games_thread(title, games, strategies):
         lines.append(f"*{i + 1}.* {strategy}")
         lines.append(f"  {format_numbers(nums)}\n")
 
-    lines.append("_당첨을 보장하지 않습니다_")
-
     blocks = []
     chunk = []
     chunk_len = 0
@@ -480,7 +465,7 @@ def main():
     print("  스레드: 빈도 기반 추천")
 
     # 3) AI 추천 스레드
-    ai_blocks = build_games_thread("사주 기반 추천 (戊午년 오행 분석)", ai_games, ai_strategies)
+    ai_blocks = build_games_thread("오늘 추천 번호", ai_games, ai_strategies)
     slack_post([{"type": "divider"}] + ai_blocks, thread_ts=ts)
     print("  스레드: AI 추천")
 
