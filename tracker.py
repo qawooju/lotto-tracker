@@ -1,6 +1,5 @@
 """로또 번호 추천 — 역대 당첨 빈도 기반 분석 + Slack 발송."""
 
-import concurrent.futures
 import json
 import os
 import random
@@ -91,58 +90,39 @@ def get_latest_round():
     return weeks + 1
 
 
-def _fetch_single_round(rnd):
-    """단일 회차 당첨번호 조회 (재시도 포함)"""
-    import time
-    for attempt in range(3):
-        data = api_get(
-            f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={rnd}",
-            timeout=60,
-        )
-        if data and data.get("returnValue") == "success":
-            numbers = sorted([
-                data["drwtNo1"], data["drwtNo2"], data["drwtNo3"],
-                data["drwtNo4"], data["drwtNo5"], data["drwtNo6"],
-            ])
-            return {
-                "rnd": rnd,
-                "numbers": numbers,
-                "bonus": data["bnusNo"],
-                "date": data.get("drwNoDate", ""),
-            }
-        time.sleep(1 + attempt)
-    return None
-
-
 def fetch_lotto_history(state):
-    """역대 당첨 번호 수집 (state에 캐시, 배치 병렬 호출)"""
-    import time
+    """역대 당첨 번호 수집 (state에 캐시, 순차 호출)"""
     cached = state.get("history", {})
     latest = get_latest_round()
 
     # 최근 회차까지 수집 (캐시에 없는 것만)
     start = max(1, latest - 100)  # 최근 100회차
     missing = [rnd for rnd in range(start, latest + 1) if str(rnd) not in cached]
+    new_count = 0
 
     if missing:
-        print(f"  신규 수집 대상: {len(missing)}회차")
-        new_count = 0
-        # 3개씩 배치 병렬 호출 (rate limit 방지)
-        batch_size = 3
-        for i in range(0, len(missing), batch_size):
-            batch = missing[i:i + batch_size]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=batch_size) as pool:
-                results = list(pool.map(_fetch_single_round, batch))
-            for result in results:
-                if result:
-                    cached[str(result["rnd"])] = {
-                        "numbers": result["numbers"],
-                        "bonus": result["bonus"],
-                        "date": result["date"],
-                    }
-                    new_count += 1
-            if i + batch_size < len(missing):
-                time.sleep(1)  # 배치 간 1초 대기
+        print(f"  신규 수집 대상: {len(missing)}회차 (순차 호출)")
+
+    for rnd in missing:
+        data = api_get(
+            f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={rnd}",
+            timeout=60,
+        )
+        if not data or data.get("returnValue") != "success":
+            continue
+
+        numbers = sorted([
+            data["drwtNo1"], data["drwtNo2"], data["drwtNo3"],
+            data["drwtNo4"], data["drwtNo5"], data["drwtNo6"],
+        ])
+        cached[str(rnd)] = {
+            "numbers": numbers,
+            "bonus": data["bnusNo"],
+            "date": data.get("drwNoDate", ""),
+        }
+        new_count += 1
+
+    if missing:
         print(f"  수집 완료: {new_count}건")
     else:
         print(f"  캐시 사용 (신규 0건)")
