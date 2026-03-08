@@ -357,7 +357,7 @@ def generate_ai_picks(counter, history):
 def build_header(counter, history, next_round):
     _w = ["월", "화", "수", "목", "금", "토", "일"]
     _t = datetime.now(KST)
-    _d = f"{_t.strftime('%m-%d')}({_w[_t.weekday()]})"
+    _d = f"{_t.strftime('%m-%d')} ({_w[_t.weekday()]})"
 
     # 최근 당첨 번호
     latest_rnd = max(history.keys(), key=int)
