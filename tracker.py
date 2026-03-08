@@ -219,7 +219,7 @@ def get_strategy_name(idx):
 # ── 메시지 빌드 ───────────────────────────────────────────────────────────
 def format_numbers(nums):
     """번호를 포맷"""
-    return "  ".join(f"`{n:2d}`" for n in nums)
+    return ", ".join(str(n) for n in nums)
 
 
 def generate_ai_picks(counter, history):
@@ -389,27 +389,16 @@ def build_header(counter, history, next_round):
 
 
 def build_games_thread(title, games, strategies):
-    """추천 게임 스레드 블록"""
-    lines = [f"*{title}*\n"] if title else []
+    """추천 게임 스레드 블록 — 게임별 개별 블록"""
+    blocks = []
+    if title:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{title}*"}})
     for i, nums in enumerate(games):
         if i < len(strategies) and strategies[i]:
-            lines.append(f"*{i + 1}.* {strategies[i]}")
-            lines.append(f"  {format_numbers(nums)}\n")
+            text = f"*{i + 1}.* {strategies[i]}\n  {format_numbers(nums)}"
         else:
-            lines.append(f"*{i + 1}.*  {format_numbers(nums)}\n")
-
-    blocks = []
-    chunk = []
-    chunk_len = 0
-    for line in lines:
-        if chunk and chunk_len + len(line) + 1 > 350:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
-            chunk = []
-            chunk_len = 0
-        chunk.append(line)
-        chunk_len += len(line) + 1
-    if chunk:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
+            text = f"*{i + 1}.*  {format_numbers(nums)}"
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": text}})
     return blocks
 
 
