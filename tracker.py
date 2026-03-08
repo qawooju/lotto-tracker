@@ -1,5 +1,6 @@
 """로또 번호 추천 — 역대 당첨 빈도 기반 분석 + Slack 발송."""
 
+import concurrent.futures
 import json
 import os
 import random
@@ -90,39 +91,54 @@ def get_latest_round():
     return weeks + 1
 
 
+def _fetch_single_round(rnd):
+    """단일 회차 당첨번호 조회"""
+    data = api_get(
+        f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={rnd}"
+    )
+    if not data or data.get("returnValue") != "success":
+        return None
+
+    numbers = sorted([
+        data["drwtNo1"], data["drwtNo2"], data["drwtNo3"],
+        data["drwtNo4"], data["drwtNo5"], data["drwtNo6"],
+    ])
+    return {
+        "rnd": rnd,
+        "numbers": numbers,
+        "bonus": data["bnusNo"],
+        "date": data.get("drwNoDate", ""),
+    }
+
+
 def fetch_lotto_history(state):
-    """역대 당첨 번호 수집 (state에 캐시)"""
+    """역대 당첨 번호 수집 (state에 캐시, 병렬 호출)"""
     cached = state.get("history", {})
     latest = get_latest_round()
 
     # 최근 회차까지 수집 (캐시에 없는 것만)
     start = max(1, latest - 100)  # 최근 100회차
-    new_count = 0
+    missing = [rnd for rnd in range(start, latest + 1) if str(rnd) not in cached]
 
-    for rnd in range(start, latest + 1):
-        if str(rnd) in cached:
-            continue
+    if missing:
+        print(f"  신규 수집 대상: {len(missing)}회차 (병렬 호출)")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            results = pool.map(_fetch_single_round, missing)
 
-        data = api_get(
-            f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={rnd}"
-        )
-        if not data or data.get("returnValue") != "success":
-            continue
+        new_count = 0
+        for result in results:
+            if result:
+                cached[str(result["rnd"])] = {
+                    "numbers": result["numbers"],
+                    "bonus": result["bonus"],
+                    "date": result["date"],
+                }
+                new_count += 1
+        print(f"  수집 완료: {new_count}건")
+    else:
+        print(f"  캐시 사용 (신규 0건)")
 
-        numbers = sorted([
-            data["drwtNo1"], data["drwtNo2"], data["drwtNo3"],
-            data["drwtNo4"], data["drwtNo5"], data["drwtNo6"],
-        ])
-        bonus = data["bnusNo"]
-
-        cached[str(rnd)] = {
-            "numbers": numbers,
-            "bonus": bonus,
-            "date": data.get("drwNoDate", ""),
-        }
-        new_count += 1
-
-    print(f"  총 {len(cached)}회차 데이터 (신규 {new_count}건)")
+    print(f"  총 {len(cached)}회차 데이터")
     return cached
 
 
