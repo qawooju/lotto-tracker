@@ -355,7 +355,9 @@ def generate_ai_picks(counter, history):
 
 
 def build_header(counter, history, next_round):
-    now = datetime.now(KST).strftime("%Y-%m-%d %H:%M KST")
+    _w = ["월", "화", "수", "목", "금", "토", "일"]
+    _t = datetime.now(KST)
+    _d = f"{_t.strftime('%m-%d')}({_w[_t.weekday()]})"
 
     # 최근 당첨 번호
     latest_rnd = max(history.keys(), key=int)
@@ -368,8 +370,7 @@ def build_header(counter, history, next_round):
     hot_str = ", ".join(f"*{n}*({c}회)" for n, c in top10)
 
     blocks = [
-        {"type": "header", "text": {"type": "plain_text", "text": f"로또 번호 추천 (제{next_round}회)"}},
-        {"type": "context", "elements": [{"type": "mrkdwn", "text": now}]},
+        {"type": "header", "text": {"type": "plain_text", "text": f"로또 번호 추천 (제{next_round}회) | {_d}"}},
         {"type": "divider"},
         {
             "type": "section",
