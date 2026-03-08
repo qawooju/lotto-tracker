@@ -392,15 +392,17 @@ def build_games_thread(title, games, strategies):
     """추천 게임 스레드 블록"""
     lines = [f"*{title}*\n"] if title else []
     for i, nums in enumerate(games):
-        strategy = strategies[i] if i < len(strategies) else f"추천 {i + 1}"
-        lines.append(f"*{i + 1}.* {strategy}")
+        if i < len(strategies) and strategies[i]:
+            lines.append(f"*{i + 1}.* {strategies[i]}")
+        else:
+            lines.append(f"*{i + 1}.*")
         lines.append(f"  {format_numbers(nums)}\n")
 
     blocks = []
     chunk = []
     chunk_len = 0
     for line in lines:
-        if chunk and chunk_len + len(line) + 1 > 800:
+        if chunk and chunk_len + len(line) + 1 > 500:
             blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(chunk)}})
             chunk = []
             chunk_len = 0
@@ -465,7 +467,7 @@ def main():
     print("  스레드: 빈도 기반 추천")
 
     # 3) AI 추천 스레드
-    ai_blocks = build_games_thread("", ai_games, ai_strategies)
+    ai_blocks = build_games_thread("오늘 추천 번호", ai_games, [])
     slack_post([{"type": "divider"}] + ai_blocks, thread_ts=ts)
     print("  스레드: AI 추천")
 
