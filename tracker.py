@@ -81,53 +81,54 @@ def slack_post(blocks, thread_ts=None):
 
 
 # ── 로또 당첨 데이터 수집 ─────────────────────────────────────────────────
-def get_latest_round():
-    """최신 회차 번호 찾기"""
-    # 1회차: 2002-12-07, 매주 토요일 추첨
-    from_date = datetime(2002, 12, 7)
-    now = datetime.now(KST).replace(tzinfo=None)
-    weeks = (now - from_date).days // 7
-    return weeks + 1
+# smok95/lotto GitHub Pages — 빠르고 안정적인 로또 데이터 소스
+LOTTO_ALL_URL = "https://smok95.github.io/lotto/results/all.json"
+LOTTO_LATEST_URL = "https://smok95.github.io/lotto/results/latest.json"
 
 
 def fetch_lotto_history(state):
-    """역대 당첨 번호 수집 (state에 캐시, 순차 호출)"""
+    """역대 당첨 번호 수집 (GitHub Pages → 전체 데이터 한 번에)"""
     cached = state.get("history", {})
-    latest = get_latest_round()
 
-    # 최근 회차까지 수집 (캐시에 없는 것만)
-    start = max(1, latest - 100)  # 최근 100회차
-    missing = [rnd for rnd in range(start, latest + 1) if str(rnd) not in cached]
-    new_count = 0
+    # all.json으로 전체 데이터 한 번에 가져오기
+    print("  smok95/lotto 데이터 조회...")
+    all_data = api_get(LOTTO_ALL_URL, timeout=30)
 
-    if missing:
-        print(f"  신규 수집 대상: {len(missing)}회차 (순차 호출)")
-
-    for rnd in missing:
-        data = api_get(
-            f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={rnd}",
-            timeout=60,
-        )
-        if not data or data.get("returnValue") != "success":
-            continue
-
-        numbers = sorted([
-            data["drwtNo1"], data["drwtNo2"], data["drwtNo3"],
-            data["drwtNo4"], data["drwtNo5"], data["drwtNo6"],
-        ])
-        cached[str(rnd)] = {
-            "numbers": numbers,
-            "bonus": data["bnusNo"],
-            "date": data.get("drwNoDate", ""),
-        }
-        new_count += 1
-
-    if missing:
-        print(f"  수집 완료: {new_count}건")
+    if all_data and isinstance(all_data, list):
+        for item in all_data:
+            rnd = item.get("draw_no")
+            nums = item.get("numbers")
+            bonus = item.get("bonus_no")
+            date_str = item.get("date", "")
+            if rnd and nums:
+                cached[str(rnd)] = {
+                    "numbers": sorted(nums),
+                    "bonus": bonus,
+                    "date": date_str[:10] if date_str else "",
+                }
+        print(f"  전체 {len(cached)}회차 로드 완료")
     else:
-        print(f"  캐시 사용 (신규 0건)")
+        # fallback: latest만 가져오기
+        print("  all.json 실패, latest.json 시도...")
+        latest = api_get(LOTTO_LATEST_URL, timeout=30)
+        if latest:
+            rnd = latest.get("draw_no")
+            nums = latest.get("numbers")
+            cached[str(rnd)] = {
+                "numbers": sorted(nums),
+                "bonus": latest.get("bonus_no"),
+                "date": latest.get("date", "")[:10],
+            }
+        if not cached:
+            print("  데이터 수집 실패!")
 
-    print(f"  총 {len(cached)}회차 데이터")
+    # 최근 100회차만 유지
+    if len(cached) > 100:
+        sorted_keys = sorted(cached.keys(), key=int)
+        for k in sorted_keys[:-100]:
+            del cached[k]
+
+    print(f"  분석 대상: {len(cached)}회차")
     return cached
 
 
@@ -450,8 +451,8 @@ def main():
     print("\n[빈도 분석]")
     counter, pair_counter = analyze_frequency(history)
 
-    # 다음 회차
-    next_round = get_latest_round() + 1
+    # 다음 회차 (데이터에서 최신 회차 + 1)
+    next_round = max(int(k) for k in history.keys()) + 1
 
     # 추천 번호 생성
     print("\n[빈도 기반 추천]")
