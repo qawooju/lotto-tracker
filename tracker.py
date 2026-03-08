@@ -219,7 +219,7 @@ def get_strategy_name(idx):
 # ── 메시지 빌드 ───────────────────────────────────────────────────────────
 def format_numbers(nums):
     """번호를 포맷"""
-    return ", ".join(str(n) for n in nums)
+    return ", ".join(f"`{n}`" for n in nums)
 
 
 def generate_ai_picks(counter, history):
