@@ -207,11 +207,11 @@ def generate_recommendations(counter, pair_counter, num_games=5):
 def get_strategy_name(idx):
     """추천 전략명"""
     names = [
-        "핫넘버 조합 (최다 출현 번호)",
-        "핫+콜드 믹스 (다빈도 4 + 저빈도 2)",
-        "베스트 페어 (자주 함께 당첨된 쌍)",
-        "가중치 랜덤 A (빈도 기반)",
-        "가중치 랜덤 B (빈도 기반)",
+        "최다 출현 번호 조합",
+        "다빈도 + 저빈도 혼합",
+        "자주 함께 당첨된 번호 조합",
+        "가중치 랜덤 A",
+        "가중치 랜덤 B",
     ]
     return names[idx] if idx < len(names) else f"추천 {idx + 1}"
 
@@ -390,7 +390,7 @@ def build_header(counter, history, next_round):
 
 def build_games_thread(title, games, strategies):
     """추천 게임 스레드 블록"""
-    lines = [f"*{title}*\n"]
+    lines = [f"*{title}*\n"] if title else []
     for i, nums in enumerate(games):
         strategy = strategies[i] if i < len(strategies) else f"추천 {i + 1}"
         lines.append(f"*{i + 1}.* {strategy}")
@@ -465,7 +465,7 @@ def main():
     print("  스레드: 빈도 기반 추천")
 
     # 3) AI 추천 스레드
-    ai_blocks = build_games_thread("오늘 추천 번호", ai_games, ai_strategies)
+    ai_blocks = build_games_thread("", ai_games, ai_strategies)
     slack_post([{"type": "divider"}] + ai_blocks, thread_ts=ts)
     print("  스레드: AI 추천")
 
