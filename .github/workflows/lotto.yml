@@ -2,8 +2,8 @@ name: Lotto Tracker
 
 on:
   schedule:
-    # 매주 토요일 오전 11:30 KST (= 2:30 UTC)
-    - cron: '30 2 * * 6'
+    # 매주 토요일 오전 11:30 KST 목표 (5h 딜레이 보정)
+    - cron: '30 21 * * 5'
   workflow_dispatch:
 
 permissions:
