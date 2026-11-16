@@ -150,55 +150,99 @@ def analyze_frequency(history):
     return counter, pair_counter
 
 
-def generate_recommendations(counter, pair_counter, num_games=5):
-    """빈도 기반 가중치 추천 번호 생성"""
+# 다양성 제약 — 매주 같은 번호만 반복되지 않게
+MAX_GAMES_PER_NUMBER = 2   # 한 주 5게임 안에서 한 번호가 들어갈 수 있는 게임 수
+MAX_OVERLAP_IN_WEEK = 2    # 같은 주 게임끼리 겹쳐도 되는 번호 수
+MAX_OVERLAP_RECENT = 3     # 최근 추천 조합과 겹쳐도 되는 번호 수 (4개 이상 겹치면 다시 뽑음)
+RECENT_WEEKS = 4           # 최근 몇 주 추천을 기억할지
+HOT_POOL_SIZE = 20         # 핫넘버 풀 (20위와 동률까지 포함)
+
+
+def _weighted_sample(population, weights, k):
+    """가중치 비복원 추출"""
+    pop, w = list(population), list(weights)
+    picked = []
+    for _ in range(min(k, len(pop))):
+        i = random.choices(range(len(pop)), weights=w, k=1)[0]
+        picked.append(pop.pop(i))
+        w.pop(i)
+    return picked
+
+
+def _is_diverse(nums, games, usage, recent, strict=True):
+    """주간 다양성·최근 반복 제약 확인"""
+    if any(usage[n] >= MAX_GAMES_PER_NUMBER for n in nums):
+        return False
+    if any(len(set(nums) & set(g)) > MAX_OVERLAP_IN_WEEK for g in games):
+        return False
+    if strict and any(len(set(nums) & set(r)) > MAX_OVERLAP_RECENT for r in recent):
+        return False
+    return True
+
+
+def generate_recommendations(counter, pair_counter, num_games=5, recent=None):
+    """빈도 기반 가중치 추천 번호 생성 (주간 다양성 + 최근 반복 회피)"""
+    recent = recent or []
     games = []
+    usage = Counter()
     all_numbers = list(range(1, 46))
 
     # 빈도를 가중치로 변환
     weights = [counter.get(n, 0) + 1 for n in all_numbers]
 
-    # 상위 빈도 번호 (핫넘버)
-    hot_numbers = [n for n, _ in counter.most_common(15)]
-    # 하위 빈도 번호 (콜드넘버)
-    cold_numbers = [n for n, _ in counter.most_common()[-10:]]
+    # 핫넘버: 상위 HOT_POOL_SIZE 위와 동률까지 포함 (순위 경계가 동률이라 고정 15개는 의미 없음)
+    ranked = counter.most_common()
+    cut = ranked[min(HOT_POOL_SIZE, len(ranked)) - 1][1]
+    hot_numbers = [n for n, c in ranked if c >= cut]
+    hot_weights = [counter[n] for n in hot_numbers]
+    # 콜드넘버: 하위 10개
+    cold_numbers = [n for n, _ in ranked[-10:]]
+    cold_weights = [1 / (counter[n] + 1) for n in cold_numbers]
+    # 상위 쌍 30개 (빈도 비례로 뽑음)
+    top_pairs = pair_counter.most_common(30)
 
-    for game_idx in range(num_games):
+    def draw(game_idx):
         if game_idx == 0:
-            # 게임 1: 핫넘버 중심 (가장 자주 나온 번호)
-            pool = hot_numbers[:]
-            random.shuffle(pool)
-            nums = sorted(pool[:6])
-        elif game_idx == 1:
-            # 게임 2: 핫+콜드 믹스 (핫 4개 + 콜드 2개)
-            hot_pick = random.sample(hot_numbers, 4)
-            cold_pick = random.sample(cold_numbers, 2)
-            nums = sorted(hot_pick + cold_pick)
-        elif game_idx == 2:
-            # 게임 3: 자주 같이 나온 쌍 기반
-            top_pairs = pair_counter.most_common(20)
-            picked = set()
-            for (a, b), _ in top_pairs:
+            # 게임 1: 핫넘버 중심 (빈도 비례)
+            return _weighted_sample(hot_numbers, hot_weights, 6)
+        if game_idx == 1:
+            # 게임 2: 핫 4개 + 콜드 2개
+            hot_pick = _weighted_sample(hot_numbers, hot_weights, 4)
+            cold = [n for n in cold_numbers if n not in hot_pick]
+            cold_pick = _weighted_sample(cold, [cold_weights[cold_numbers.index(n)] for n in cold], 2)
+            return hot_pick + cold_pick
+        if game_idx == 2:
+            # 게임 3: 자주 같이 나온 쌍 3개를 빈도 비례로 뽑아 조합
+            picked = []
+            pairs = [p for p, _ in top_pairs]
+            pw = [c for _, c in top_pairs]
+            for a, b in _weighted_sample(pairs, pw, len(pairs)):
                 if len(picked) >= 6:
                     break
                 if a not in picked and b not in picked and len(picked) <= 4:
-                    picked.add(a)
-                    picked.add(b)
-                elif a not in picked and len(picked) < 6:
-                    picked.add(a)
-                elif b not in picked and len(picked) < 6:
-                    picked.add(b)
+                    picked += [a, b]
             while len(picked) < 6:
-                picked.add(random.choice(hot_numbers))
-            nums = sorted(list(picked)[:6])
-        else:
-            # 게임 4, 5: 빈도 가중치 랜덤
-            nums = sorted(random.choices(all_numbers, weights=weights, k=6))
-            # 중복 제거
-            while len(set(nums)) < 6:
-                nums = sorted(random.choices(all_numbers, weights=weights, k=6))
-            nums = sorted(list(set(nums))[:6])
+                n = random.choices(hot_numbers, weights=hot_weights, k=1)[0]
+                if n not in picked:
+                    picked.append(n)
+            return picked
+        # 게임 4, 5: 전체 번호 빈도 가중치 랜덤
+        return _weighted_sample(all_numbers, weights, 6)
 
+    for game_idx in range(num_games):
+        nums = None
+        # 엄격 조건으로 먼저 시도, 안 되면 최근 반복 조건만 풀고, 그래도 안 되면 그냥 뽑음
+        for strict in (True, False):
+            for _ in range(500):
+                cand = sorted(draw(game_idx))
+                if len(set(cand)) == 6 and _is_diverse(cand, games, usage, recent, strict):
+                    nums = cand
+                    break
+            if nums:
+                break
+        if not nums:
+            nums = sorted(draw(game_idx))
+        usage.update(nums)
         games.append(nums)
 
     return games
@@ -433,7 +477,9 @@ def main():
 
     # 추천 번호 생성
     print("\n[빈도 기반 추천]")
-    freq_games = generate_recommendations(counter, pair_counter, NUM_GAMES)
+    recent_weeks = state.get("recent_picks", [])
+    recent = [g for week in recent_weeks for g in week]
+    freq_games = generate_recommendations(counter, pair_counter, NUM_GAMES, recent)
     freq_strategies = [get_strategy_name(i) for i in range(NUM_GAMES)]
     for i, nums in enumerate(freq_games):
         print(f"  빈도 {i + 1}: {nums}")
@@ -463,6 +509,7 @@ def main():
 
     # 상태 저장
     state["history"] = history
+    state["recent_picks"] = (recent_weeks + [freq_games])[-RECENT_WEEKS:]
     state["last_run"] = now_kst.isoformat()
     save_state(state)
     print("상태 저장 완료")
